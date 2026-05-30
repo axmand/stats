@@ -1,9 +1,11 @@
 import pandas as pd
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
 from scipy import stats
 from scipy.stats import pearsonr
-import matplotlib.pyplot as plt
 from scipy.interpolate import make_interp_spline
+
 plt.rcParams['font.sans-serif'] = ['Microsoft YaHei']
 plt.rcParams['axes.unicode_minus'] = False
 
@@ -69,6 +71,169 @@ def stats_base(scores, excellent_line=90, pass_line=60):
     with pd.ExcelWriter('结果/基本统计.xlsx') as writer:
         pd.DataFrame([r]).to_excel(writer, index=False)
     return r
+
+def stats_overall_section(perfect):
+    """
+    输出试卷整体、客观题(1-40)、主观题(41-52)的难度与区分度
+    """
+    # ----- 提取数据（与之前一致）-----
+    type_row = df.iloc[2, 2:-1].astype(str).str.strip()
+    qnum_row = df.iloc[3, 2:-1].astype(str).str.strip()
+    scores_mat = df.iloc[4:, 2:-1].apply(pd.to_numeric, errors='coerce')
+    total_scores = pd.to_numeric(df.iloc[4:, -1], errors='coerce')
+
+    # 每题满分
+    question_marks = []
+    for col in scores_mat.columns:
+        t = type_row[col]
+        question_marks.append(perfect[t] if t in perfect else scores_mat[col].max())
+    question_marks = pd.Series(question_marks, index=scores_mat.columns)
+
+    total_full = question_marks.sum()   # 全卷满分
+    qnum_int = qnum_row.astype(int)
+
+    # ----- 辅助函数：计算某题号范围的统计 -----
+    def section_stats(start, end):
+        mask = (qnum_int >= start) & (qnum_int <= end)
+        cols = qnum_int[mask].index
+        if mask.sum() == 0:
+            return None
+        full = question_marks[cols].sum()
+        stu_scores = scores_mat[cols].sum(axis=1)
+        avg_rate = (stu_scores / full).mean()               # 难度
+        valid = stu_scores.notna() & total_scores.notna()
+        corr = pearsonr(stu_scores[valid], total_scores[valid])[0] if valid.sum() > 1 else np.nan
+        return {
+            '题目数': mask.sum(),
+            '满分': full,
+            '难度(平均得分率)': round(avg_rate, 3),
+            '区分度(与总分相关)': round(corr, 3)
+        }
+
+    # 客观题
+    obj = section_stats(1, 40)
+    # 主观题
+    subj = section_stats(41, 52)
+    # 整体
+    overall = section_stats(1, len(qnum_int))   # 所有题
+
+    # ----- 构建结果 DataFrame -----
+    rows = []
+    # 整体
+    rows.append({
+        '部分': '整体',
+        '题目数': overall['题目数'],
+        '满分': overall['满分'],
+        '难度(平均得分率)': overall['难度(平均得分率)'],
+        '区分度(与总分相关)': 1.0   # 整体自身相关定义为1，无实际意义，改用题目平均区分度
+    })
+    # 用各题区分度的平均值作为整体区分度参考
+    per_q = stats_per_question(perfect)   # 借用之前的逐题函数
+    avg_discrimination = per_q['区分度'].mean()
+    rows[0]['题目平均区分度'] = round(avg_discrimination, 3)
+
+    # 客观题
+    rows.append({
+        '部分': '客观题(1-40)',
+        '题目数': obj['题目数'],
+        '满分': obj['满分'],
+        '难度(平均得分率)': obj['难度(平均得分率)'],
+        '区分度(与总分相关)': obj['区分度(与总分相关)']
+    })
+    # 主观题
+    rows.append({
+        '部分': '主观题(41-52)',
+        '题目数': subj['题目数'],
+        '满分': subj['满分'],
+        '难度(平均得分率)': subj['难度(平均得分率)'],
+        '区分度(与总分相关)': subj['区分度(与总分相关)']
+    })
+
+    with pd.ExcelWriter('结果/试卷整体分析报告.xlsx') as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name='试卷整体分析', index=False)
+
+    return pd.DataFrame(rows)
+
+def stats_content_validity(perfect):
+    """
+    基于教学大纲要求（第一行）统计各类别的题目数量、占比以及学生的平均得分率，判断试卷内容是否与大纲权重匹配。
+    """
+    outline_row = df.iloc[0, 2:-1].astype(str).str.strip()
+    type_row    = df.iloc[2, 2:-1].astype(str).str.strip()
+    scores_mat  = df.iloc[4:, 2:-1].apply(pd.to_numeric, errors='coerce')
+
+    question_marks = []
+    for col in scores_mat.columns:
+        t = type_row[col]
+        question_marks.append(perfect[t] if t in perfect else scores_mat[col].max())
+    question_marks = pd.Series(question_marks, index=scores_mat.columns)
+
+    total_questions = len(outline_row)
+    unique_outlines = pd.unique(outline_row)
+    results = []
+    for outline in unique_outlines:
+        cols = outline_row[outline_row == outline].index
+        q_count = len(cols)
+        proportion = q_count / total_questions
+        # 该类别满分总和
+        outline_full = question_marks[cols].sum()
+        # 学生在该类别的总得分
+        stu_scores = scores_mat[cols].sum(axis=1)
+        avg_rate = (stu_scores / outline_full).mean()
+        results.append({
+            '大纲类别': outline,
+            '题目数': q_count,
+            '占比': round(proportion, 3),
+            '满分': outline_full,
+            '平均得分率': round(avg_rate, 3)
+        })
+
+    with pd.ExcelWriter('结果/内容效度分析报告.xlsx') as writer:
+        pd.DataFrame(results).to_excel(writer, sheet_name='内容效度分析', index=False)
+
+    return pd.DataFrame(results)
+
+def stats_construct_validity(perfect):
+    """
+    结构效度：计算认知层次得分之间的相关矩阵，以及各层次与总分的相关
+    """
+    level_row = df.iloc[1, 2:-1].astype(str).str.strip()
+    type_row  = df.iloc[2, 2:-1].astype(str).str.strip()
+    scores_mat = df.iloc[4:, 2:-1].apply(pd.to_numeric, errors='coerce')
+    total_scores = pd.to_numeric(df.iloc[4:, -1], errors='coerce')
+    
+    question_marks = []
+    for col in scores_mat.columns:
+        t = type_row[col]
+        question_marks.append(perfect[t] if t in perfect else scores_mat[col].max())
+    question_marks = pd.Series(question_marks, index=scores_mat.columns)
+
+    levels = pd.unique(level_row)
+    level_scores = {}
+    for lvl in levels:
+        cols = level_row[level_row == lvl].index
+        level_full = question_marks[cols].sum()
+        stu_score = scores_mat[cols].sum(axis=1)
+        level_scores[lvl] = stu_score / level_full
+
+    # 构建 DataFrame
+    df_levels = pd.DataFrame(level_scores)
+    df_levels['总分'] = total_scores.values
+
+    # 相关矩阵
+    corr_matrix = df_levels.corr()
+
+    # 提取维度间相关（排除总分）
+    dims = list(level_scores.keys())
+    inter_corr = corr_matrix.loc[dims, dims]
+    # 各维度与总分的相关
+    dim_total_corr = corr_matrix.loc[dims, '总分']
+
+    with pd.ExcelWriter('结果/结构效度分析报告.xlsx') as writer:
+        corr_matrix.to_excel(writer, sheet_name='结构效度相关矩阵', index=False)
+        dim_total_corr.to_excel(writer, sheet_name='结构效度', startrow=corr_matrix.shape[0] + 2)
+
+    return corr_matrix, dim_total_corr
 
 def stats_topic(perfect):
     """
@@ -432,6 +597,7 @@ def plot_per_question_difficulty_pie(per_question_stats, thresholds=(0.2, 0.4, 0
 
 def plot_per_question(per_question_stats):
     """
+    绘制逐题难度和区分度
     """
     fig, ax1 = plt.subplots(figsize=(16, 6))
     x = range(len(per_question_stats))
@@ -449,6 +615,44 @@ def plot_per_question(per_question_stats):
     fig.legend(loc='upper right', bbox_to_anchor=(0.9, 0.9))
     plt.tight_layout()
     plt.savefig('结果/逐题分析.png', dpi=300)
+
+def plot_per_question_difficulty_bar(per_question_stats, bin_width=0.1):
+    """
+    按固定间隔统计难度分布并绘制柱状图
+    bin_width: 区间宽度，默认 0.1
+    """
+    difficulties = per_question_stats['难度(平均得分率)']
+    
+    # 确定区间范围（覆盖全部数据）
+    min_val = np.floor(difficulties.min() * 10) / 10
+    max_val = np.ceil(difficulties.max() * 10) / 10
+    bins = np.arange(min_val, max_val + bin_width, bin_width)
+    # 如最后一个区间可能刚好等于最大值，确保包含
+    if bins[-1] < difficulties.max():
+        bins = np.append(bins, bins[-1] + bin_width)
+    
+    # 使用 pd.cut 分箱并计数
+    bin_labels = [f'{bins[i]:.1f}-{bins[i+1]:.1f}' for i in range(len(bins)-1)]
+    binned = pd.cut(difficulties, bins=bins, right=False, include_lowest=True)
+    counts = binned.value_counts().sort_index()
+    
+    # 绘图
+    plt.figure(figsize=(10, 6))
+    bars = plt.bar(range(len(counts)), counts.values, 
+                   color='#5470c6', edgecolor='white', alpha=0.85)
+    plt.xticks(range(len(counts)), counts.index, rotation=45, ha='right')
+    plt.xlabel('难度区间（得分率）')
+    plt.ylabel('题目数量')
+    plt.title('试卷难度分布（间隔0.1）')
+    
+    # 数值标签
+    for bar, count in zip(bars, counts.values):
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.2,
+                 str(count), ha='center', va='bottom', fontsize=10)
+    
+    plt.grid(axis='y', alpha=0.3)
+    plt.tight_layout()
+    plt.savefig("结果/难度分布柱状图_0.1间隔统计.png", dpi=300, bbox_inches='tight')
 
 def plot_ctt_per_question(ctt_stats):
     """
@@ -471,6 +675,88 @@ def plot_ctt_per_question(ctt_stats):
         plt.savefig(f"结果/ctt_{qnum}.png", dpi=200)
         plt.close()
 
+def plot_content_validity(content_df):
+    """
+    内容效度双轴图：大纲类别题目占比（柱状图）+ 平均得分率（折线）
+    大纲类别按占比由低到高排序（可改为按平均得分率）
+    """
+    # ----- 新增：按“占比”由低到高排序 -----
+    content_df = content_df.sort_values(by='占比', ascending=True)
+    # ------------------------------------
+    
+    fig, ax1 = plt.subplots(figsize=(8, 5))
+    x = range(len(content_df))
+    categories = content_df['大纲类别']
+    proportion = content_df['占比']
+    avg_rate = content_df['平均得分率']
+    
+    bars = ax1.bar(x, proportion, color='#5470c6', alpha=0.7, label='题目占比')
+    ax1.set_ylabel('题目占比', color='#5470c6')
+    ax1.tick_params(axis='y', labelcolor='#5470c6')
+    ax1.set_ylim(0, max(proportion) * 1.2)
+    
+    for bar, prop in zip(bars, proportion):
+        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.01,
+                 f'{prop:.1%}', ha='center', va='bottom', fontsize=9)
+    
+    ax2 = ax1.twinx()
+    ax2.plot(x, avg_rate, 'o-', color='#ee6666', linewidth=2, markersize=8, label='平均得分率')
+    ax2.set_ylabel('平均得分率', color='#ee6666')
+    ax2.tick_params(axis='y', labelcolor='#ee6666')
+    ax2.set_ylim(0, 1.05)
+    
+    for i, rate in enumerate(avg_rate):
+        ax2.text(i, rate + 0.02, f'{rate:.2f}', ha='center', va='bottom', color='#ee6666', fontsize=9)
+    
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(categories, rotation=30)
+    ax1.set_title('试卷内容效度：大纲类别覆盖与得分率', fontsize=14)
+    
+    lines1, labels1 = ax1.get_legend_handles_labels()
+    lines2, labels2 = ax2.get_legend_handles_labels()
+    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+    
+    fig.tight_layout()
+    plt.savefig("结果/内容效度.png", dpi=300, bbox_inches='tight')
+
+def plot_construct_validity(corr_matrix, dim_total_corr):
+    """
+    结构效度可视化：
+    1. 认知层次相关矩阵热力图
+    2. 各维度与总分相关系数柱状图
+    corr_matrix: construct_validity 返回的完整相关矩阵 DataFrame
+    dim_total_corr: construct_validity 返回的维度-总分相关系数 Series
+    """
+    # 1. 热力图
+    plt.figure(figsize=(8, 6))
+    sns.heatmap(corr_matrix, annot=True, cmap='RdBu_r', center=0,
+                square=True, linewidths=0.5, fmt='.2f',
+                vmin=-1, vmax=1, cbar_kws={'shrink':0.8})
+    plt.title('结构效度：认知层次与总分相关矩阵', fontsize=14)
+    plt.tight_layout()
+    plt.savefig(f'结果/结构效度_相关矩阵.png', dpi=300, bbox_inches='tight')
+    plt.show()
+    
+    dims = [d for d in dim_total_corr.index if d != '总分']
+    values = dim_total_corr[dims]
+    
+    plt.figure(figsize=(8, 5))
+    colors = ['#91cc75' if v >= 0.3 else '#fac858' if v >= 0.2 else '#ee6666' for v in values]
+    bars = plt.bar(dims, values, color=colors, edgecolor='white')
+    plt.axhline(y=0.3, color='green', linestyle='--', alpha=0.7, label='良好 (0.3)')
+    plt.axhline(y=0.2, color='orange', linestyle='--', alpha=0.7, label='可接受 (0.2)')
+    plt.ylim(0, 1.05)
+    for bar, val in zip(bars, values):
+        plt.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.02,
+                 f'{val:.2f}', ha='center', va='bottom', fontsize=10)
+    plt.ylabel('与总分的相关系数')
+    plt.title('结构效度：各认知层次与总分相关', fontsize=14)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(f'结果/结构效度_维度总分相关.png', dpi=300, bbox_inches='tight')
+    plt.show()
+
+
 if(__name__ == "__main__"):
     scores = load_total_scores()
     base_stats = stats_base(scores)
@@ -486,11 +772,16 @@ if(__name__ == "__main__"):
         "简答题": 5,
         "案例分析题": 10
     }
+
     topic_stats = stats_topic(perfect)
     outline_stats = stats_outline(perfect)
     cognitive_stats = stats_cognitive(perfect)
     per_question_stats = stats_per_question(perfect)
     ctt_27_stats = stats_ctt(perfect)
+    construct_validity_stats = stats_construct_validity(perfect)
+    content_validity_stats = stats_content_validity(perfect)
+    overall_section_stats = stats_overall_section (perfect)
+
     plot_total_distribution(scores, base_stats)
     plot_grouped_bar(topic_stats, '题型难度与区分度', '题型',['难度(平均得分率)', '区分度'], '题型分析.png')
     plot_grouped_bar(outline_stats, '大纲类别难度与区分度', '大纲类别',['难度(平均得分率)', '区分度'], '大纲分析.png')
@@ -498,4 +789,7 @@ if(__name__ == "__main__"):
     plot_per_question(per_question_stats)
     plot_per_question_scatter(per_question_stats)
     plot_per_question_difficulty_pie(per_question_stats)
+    plot_per_question_difficulty_bar(per_question_stats)
     plot_ctt_per_question(ctt_27_stats)
+    plot_content_validity(content_validity_stats)
+    plot_construct_validity(*construct_validity_stats)
