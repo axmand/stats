@@ -392,32 +392,43 @@ def plot_per_question_scatter(per_question_stats):
     plt.tight_layout()
     plt.savefig("结果/难度区分度散点图.png", dpi=300, bbox_inches='tight')
 
-def plot_per_question_difficulty_pie(per_question_stats, thresholds=(0.3, 0.7), labels=('难题 (<0.3)', '中等题 (0.3~0.7)', '容易题 (>0.7)')):
+def plot_per_question_difficulty_pie(per_question_stats, thresholds=(0.2, 0.4, 0.6, 0.8), labels=('过难 (<0.2)', '较难 (0.2~0.4)', '适中 (0.4~0.6)', '较易 (0.6~0.8)', '过易 (>0.8)')):
     """
     根据每题难度（平均得分率）绘制饼图
     thresholds: (低分界, 高分界)，默认 0.3、0.7
     labels: 对应三个类别的名称
     """
     diff = per_question_stats['难度(平均得分率)']
-    hard = (diff < thresholds[0]).sum()
-    medium = ((diff >= thresholds[0]) & (diff <= thresholds[1])).sum()
-    easy = (diff > thresholds[1]).sum()
-    counts = [hard, medium, easy]
-    colors = ['#ee6666', '#fac858', '#91cc75']
-    explode = (0.02, 0.02, 0.02)
-    plt.figure(figsize=(7, 7))
+    bins = [-1, thresholds[0], thresholds[1], thresholds[2], thresholds[3], 2]  # 得分率0~1，用-1和2确保边界
+    counts = [
+        ((diff < thresholds[0]).sum()),
+        ((diff >= thresholds[0]) & (diff < thresholds[1])).sum(),
+        ((diff >= thresholds[1]) & (diff < thresholds[2])).sum(),
+        ((diff >= thresholds[2]) & (diff < thresholds[3])).sum(),
+        ((diff >= thresholds[3])).sum()
+    ]
+    
+    colors = ['#ee6666', '#fac858', '#91cc75', '#5470c6', '#73c0de']
+
+    filtered = [(c, l, col) for c, l, col in zip(counts, labels, colors) if c > 0]
+
+    if not filtered:
+        return
+    
+    counts_f, labels_f, colors_f = zip(*filtered)
+    explode = (0.02,) * len(counts_f)
+    plt.figure(figsize=(8, 8))
     wedges, texts, autotexts = plt.pie(
-        counts, labels=labels, autopct='%1.1f%%',
-        startangle=140, colors=colors, explode=explode,
-        pctdistance=0.6, labeldistance=1.1
+        counts_f, labels=None, autopct='%1.1f%%',
+        startangle=140, colors=colors_f, explode=explode,
+        pctdistance=0.6
     )
-
-    for i, (label, count) in enumerate(zip(labels, counts)):
+    for i, (label, count) in enumerate(zip(labels_f, counts_f)):
         texts[i].set_text(f'{label}\n({count}道)')
-
-    plt.title('试卷难度分布（按题目难度分类）', fontsize=14)
+    
+    plt.title('试卷难度分布（五级分类）', fontsize=14)
     plt.tight_layout()
-    plt.savefig("结果/试卷难度分布饼图", dpi=300, bbox_inches='tight')
+    plt.savefig('结果/试卷难度分布饼图.png', dpi=300, bbox_inches='tight')
 
 def plot_per_question(per_question_stats):
     """
