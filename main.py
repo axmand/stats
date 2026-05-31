@@ -650,26 +650,50 @@ def plot_per_question_difficulty_bar(per_question_stats, bin_width=0.1):
     plt.tight_layout()
     plt.savefig("结果/难度分布柱状图_0.1间隔统计.png", dpi=300, bbox_inches='tight')
 
-def plot_ctt_per_question(ctt_stats):
+def plot_ctt_per_question(ctt_stats, bInterp = True):
     """
     绘制多组 CTT 曲线（组平均得分率 → 题目得分率）
     """
-    types = ctt_stats['题型'].unique()
-    cols = min(3, len(types))
-    rows = (len(types) - 1) // cols + 1
-    fig, axes = plt.subplots(rows, cols, figsize=(5*cols, 4*rows))
-    for qnum, qdata in ctt_stats.groupby('题号'):
-        plt.figure(figsize=(6, 4))
-        x = qdata['组平均总分得分率']
-        y = qdata['题目得分率']
-        plt.plot(x, y, 'o-', color='#5470c6', linewidth=2, markersize=6)
-        plt.title(f'题号 {qnum}  CTT 曲线')
-        plt.xlabel('组平均总分得分率')
-        plt.ylabel('题目得分率')
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(f"结果/ctt_{qnum}.png", dpi=200)
-        plt.close()
+    if(bInterp):
+        for qnum, qdata in ctt_stats.groupby('题号'):
+            x_orig = qdata['组平均总分得分率'].values
+            y_orig = qdata['题目得分率'].values
+            if len(x_orig) >= 4:
+                x_smooth = np.linspace(x_orig.min(), x_orig.max(), 100)
+                spl = make_interp_spline(x_orig, y_orig, bc_type='natural')
+                y_smooth = spl(x_smooth)
+            else:
+                x_smooth = x_orig
+                y_smooth = y_orig
+            plt.figure(figsize=(6, 4))
+            plt.plot(x_smooth, y_smooth, '-', color='#5470c6', linewidth=2, alpha=0.7, label='拟合曲线')
+            plt.scatter(x_orig, y_orig, color='#ee6666', s=40, zorder=5, label='实测点')
+            plt.plot(x_orig, y_orig, 'o--', color='gray', linewidth=1, alpha=0.5)
+            plt.title(f'题号 {qnum}  CTT 曲线（平滑拟合）')
+            plt.xlabel('组平均总分得分率')
+            plt.ylabel('题目得分率')
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(f"结果/ctt_{qnum}.png", dpi=200)
+            plt.close()
+    else:
+        types = ctt_stats['题型'].unique()
+        cols = min(3, len(types))
+        rows = (len(types) - 1) // cols + 1
+        fig, axes = plt.subplots(rows, cols, figsize=(5*cols, 4*rows))
+        for qnum, qdata in ctt_stats.groupby('题号'):
+            plt.figure(figsize=(6, 4))
+            x = qdata['组平均总分得分率']
+            y = qdata['题目得分率']
+            plt.plot(x, y, 'o-', color='#5470c6', linewidth=2, markersize=6)
+            plt.title(f'题号 {qnum}  CTT 曲线')
+            plt.xlabel('组平均总分得分率')
+            plt.ylabel('题目得分率')
+            plt.grid(True, alpha=0.3)
+            plt.tight_layout()
+            plt.savefig(f"结果/ctt_{qnum}.png", dpi=200)
+            plt.close()
 
 def plot_content_validity(content_df):
     """
