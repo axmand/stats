@@ -790,9 +790,9 @@ if __name__ == "__main__":
     overall_section_stats = stats_overall_section(perfect)
 
     plot_total_distribution(scores, base_stats)
-    plot_grouped_bar(topic_stats, '题型难度与区分度', '题型', ['满分','平均得分'], '题型分析.png', [ "A1", "A2", "A3", "A4","名词解释", "简答题", "案例分析题"])
-    plot_grouped_bar(outline_stats, '大纲类别难度与区分度', '大纲类别', ['满分', '平均得分'], '大纲分析.png')
-    plot_grouped_bar(cognitive_stats, '认知层次难度与区分度', '认知层次', ['满分', '平均得分'], '认知层次分析.png')
+    plot_grouped_bar(topic_stats, '题型与掌握度', '题型', ['满分','平均得分'], '题型分析.png', [ "A1", "A2", "A3", "A4","名词解释", "简答题", "案例分析题"])
+    plot_grouped_bar(outline_stats, '大纲类别与掌握度', '大纲类别', ['满分', '平均得分'], '大纲分析.png')
+    plot_grouped_bar(cognitive_stats, '认知层次与掌握度', '认知层次', ['满分', '平均得分'], '认知层次分析.png')
     plot_per_question(per_question_stats)
     plot_per_question_scatter(per_question_stats)
     plot_per_question_difficulty_pie(per_question_stats)
